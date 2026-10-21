@@ -1,0 +1,237 @@
+<!doctype html>
+<!--
+    A small dashboard for the fraud detection service.
+    It is plain HTML, CSS and JavaScript with no framework: it just calls the REST API
+    (the same endpoints anyone else could call) and draws the results.
+    Spring Boot serves anything in src/main/resources/static automatically,
+    so this page appears at http://localhost:8080.
+-->
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Fraud Detection Service</title>
+    <style>
+        :root {
+            --bg: #f6f7f9; --panel: #ffffff; --ink: #1d2433; --muted: #5d6677; --line: #e3e6ec;
+            --accent: #2f5bea; --approve: #1f8a4c; --review: #b7791f; --block: #c53030;
+            --approve-bg: #e6f4ec; --review-bg: #fbf1e1; --block-bg: #fbe7e7;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #12151c; --panel: #1b1f29; --ink: #e8ebf2; --muted: #9aa3b5; --line: #2c3240;
+                --accent: #7c9bff; --approve: #5fd08f; --review: #f0b85a; --block: #ff7b7b;
+                --approve-bg: #183a28; --review-bg: #3b2e17; --block-bg: #3e1c1c;
+            }
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; background: var(--bg); color: var(--ink);
+               font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+        main { max-width: 1100px; margin: 0 auto; padding: 28px 16px 60px; }
+        h1 { font-size: 26px; margin: 0 0 4px; }
+        h2 { font-size: 17px; margin: 0 0 14px; }
+        p.lead { margin: 0 0 24px; color: var(--muted); }
+        .grid { display: grid; gap: 16px; }
+        .stats { grid-template-columns: repeat(4, 1fr); margin-bottom: 16px; }
+        .two { grid-template-columns: 1fr 1fr; margin-bottom: 16px; }
+        .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; }
+        .stat .label { color: var(--muted); font-size: 13px; }
+        .stat .value { font-size: 28px; font-weight: 650; font-variant-numeric: tabular-nums; }
+        .stat.review .value { color: var(--review); } .stat.block .value { color: var(--block); }
+        .stat.approve .value { color: var(--approve); }
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+        th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+        td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 650; }
+        .APPROVE { background: var(--approve-bg); color: var(--approve); }
+        .REVIEW { background: var(--review-bg); color: var(--review); }
+        .BLOCK { background: var(--block-bg); color: var(--block); }
+        ul.reasons { margin: 0; padding-left: 18px; color: var(--muted); }
+        form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+        input, select { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line);
+                        border-radius: 7px; padding: 8px 10px; }
+        .actions { grid-column: 1 / -1; display: flex; gap: 10px; flex-wrap: wrap; }
+        button { font: inherit; border: 0; border-radius: 7px; padding: 9px 14px; cursor: pointer;
+                 background: var(--accent); color: #fff; font-weight: 600; }
+        button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--line); }
+        #result { margin-top: 16px; }
+        .bar { height: 8px; background: var(--line); border-radius: 99px; overflow: hidden; margin: 8px 0 10px; }
+        .bar span { display: block; height: 100%; background: var(--accent); }
+        .muted { color: var(--muted); font-size: 13px; }
+        .error { color: var(--block); }
+        .scroll { overflow-x: auto; }
+        @media (max-width: 760px) {
+            .stats { grid-template-columns: 1fr 1fr; }
+            .two, form { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+<main>
+    <h1>Fraud Detection Service</h1>
+    <p class="lead">Card payments scored by five rules plus a logistic regression model.
+        All customers and payments here are synthetic.</p>
+
+    <section class="grid stats">
+        <div class="panel stat"><div class="label">Payments scored</div><div class="value" id="total">–</div></div>
+        <div class="panel stat approve"><div class="label">Approved</div><div class="value" id="approved">–</div></div>
+        <div class="panel stat review"><div class="label">Sent for review</div><div class="value" id="review">–</div></div>
+        <div class="panel stat block"><div class="label">Blocked</div><div class="value" id="blocked">–</div></div>
+    </section>
+
+    <section class="grid two">
+        <div class="panel">
+            <h2>Try a payment</h2>
+            <form id="payment-form">
+                <label>Customer ID <input name="customerId" value="C0001" required></label>
+                <label>Amount (£) <input name="amount" type="number" step="0.01" min="0.01" value="24.50" required></label>
+                <label>Merchant category
+                    <select name="merchantCategory">
+                        <option>GROCERIES</option><option>RESTAURANTS</option><option>TRANSPORT</option>
+                        <option>ONLINE_SHOPPING</option><option>ELECTRONICS</option><option>TRAVEL</option>
+                        <option>ENTERTAINMENT</option><option>GAMBLING</option><option>CRYPTO</option>
+                        <option>GIFT_CARDS</option>
+                    </select>
+                </label>
+                <label>Country <input name="country" value="GB" maxlength="2" required></label>
+                <div class="actions">
+                    <button type="submit">Score this payment</button>
+                    <button type="button" class="secondary" id="suspicious">Fill in a suspicious one</button>
+                </div>
+            </form>
+            <div id="result"></div>
+        </div>
+
+        <div class="panel">
+            <h2>How well it works</h2>
+            <p class="muted" id="eval-summary">Loading…</p>
+            <div class="scroll">
+                <table>
+                    <thead><tr><th>Approach</th><th>Precision</th><th>Recall</th><th>False alarms</th></tr></thead>
+                    <tbody id="eval-table"></tbody>
+                </table>
+            </div>
+            <p class="muted">Precision: of the payments flagged, how many were fraud. Recall: of all fraud,
+                how much was caught. False alarms: share of genuine payments flagged.</p>
+        </div>
+    </section>
+
+    <section class="panel">
+        <h2>Recently flagged</h2>
+        <div class="scroll">
+            <table>
+                <thead><tr><th>When (UTC)</th><th>Customer</th><th>Amount</th><th>Where</th>
+                    <th>Score</th><th>Decision</th><th>Why</th></tr></thead>
+                <tbody id="flagged"></tbody>
+            </table>
+        </div>
+    </section>
+</main>
+
+<script>
+    // Any text that came from the server is escaped before it goes into the page,
+    // so a sneaky customer ID like "<script>" can't run code in someone's browser.
+    const escapeHtml = (text) => String(text).replace(/[&<>"']/g,
+        (c) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+    const money = (n) => '£' + Number(n).toLocaleString('en-GB', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    const percent = (x) => (x * 100).toFixed(1) + '%';
+    const when = (iso) => iso.replace('T', ' ').slice(0, 16);
+
+    async function getJson(url) {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('Request failed: ' + response.status);
+        return response.json();
+    }
+
+    function reasonsList(reasons) {
+        if (!reasons.length) return '<span class="muted">Nothing unusual</span>';
+        return '<ul class="reasons">' + reasons.map(r => '<li>' + escapeHtml(r) + '</li>').join('') + '</ul>';
+    }
+
+    async function loadStats() {
+        const s = await getJson('/api/stats');
+        for (const key of ['total', 'approved', 'review', 'blocked']) {
+            document.getElementById(key).textContent = s[key].toLocaleString('en-GB');
+        }
+    }
+
+    async function loadEvaluation() {
+        const e = await getJson('/api/model/evaluation');
+        document.getElementById('eval-summary').textContent =
+            `Tested on ${e.testPayments.toLocaleString('en-GB')} payments from customers the model never saw, ` +
+            `${e.testFraudPayments} of which were fraud.`;
+        const rows = [['Rules only', e.rulesOnly], ['Model only', e.modelOnly], ['Both combined', e.combined]];
+        document.getElementById('eval-table').innerHTML = rows.map(([name, m]) =>
+            `<tr><td>${name}</td><td class="num">${percent(m.precision)}</td>` +
+            `<td class="num">${percent(m.recall)}</td><td class="num">${percent(m.falsePositiveRate)}</td></tr>`).join('');
+    }
+
+    async function loadFlagged() {
+        const list = await getJson('/api/transactions/flagged');
+        const body = document.getElementById('flagged');
+        if (!list.length) {
+            body.innerHTML = '<tr><td colspan="7" class="muted">Nothing flagged yet.</td></tr>';
+            return;
+        }
+        body.innerHTML = list.map(t => `
+            <tr>
+                <td class="num">${escapeHtml(when(t.occurredAt))}</td>
+                <td>${escapeHtml(t.customerId)}</td>
+                <td class="num">${money(t.amount)}</td>
+                <td>${escapeHtml(t.merchantCategory)}<br><span class="muted">${escapeHtml(t.country)}</span></td>
+                <td class="num">${t.riskScore}</td>
+                <td><span class="pill ${t.decision}">${t.decision}</span></td>
+                <td>${reasonsList(t.reasons)}</td>
+            </tr>`).join('');
+    }
+
+    async function refresh() {
+        try {
+            await Promise.all([loadStats(), loadEvaluation(), loadFlagged()]);
+        } catch (err) {
+            document.getElementById('eval-summary').innerHTML =
+                '<span class="error">Could not reach the API. Is the app running?</span>';
+        }
+    }
+
+    document.getElementById('suspicious').addEventListener('click', () => {
+        const form = document.getElementById('payment-form');
+        form.amount.value = '899.00';
+        form.merchantCategory.value = 'GIFT_CARDS';
+        form.country.value = 'AE';
+    });
+
+    document.getElementById('payment-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const form = event.target;
+        const payload = {
+            customerId: form.customerId.value.trim(),
+            amount: Number(form.amount.value),
+            merchantCategory: form.merchantCategory.value,
+            country: form.country.value.trim().toUpperCase()
+        };
+        const result = document.getElementById('result');
+        const response = await fetch('/api/transactions', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            result.innerHTML = '<p class="error">' + data.details.map(escapeHtml).join('<br>') + '</p>';
+            return;
+        }
+        result.innerHTML = `
+            <div><span class="pill ${data.decision}">${data.decision}</span>
+                <span class="muted">&nbsp;risk score ${data.riskScore} / 100</span></div>
+            <div class="bar"><span style="width:${data.riskScore}%"></span></div>
+            ${reasonsList(data.reasons)}`;
+        refresh();
+    });
+
+    refresh();
+</script>
+</body>
+</html>

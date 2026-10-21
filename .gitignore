@@ -1,0 +1,18 @@
+# Build output (Maven puts everything it builds in here)
+target/
+
+# Editor and IDE files
+.vscode/
+.idea/
+*.iml
+.classpath
+.project
+.settings/
+.factorypath
+
+# Operating system clutter
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
